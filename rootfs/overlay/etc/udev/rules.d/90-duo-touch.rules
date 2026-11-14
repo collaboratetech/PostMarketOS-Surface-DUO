@@ -1,0 +1,3 @@
+# Surface Duo : chaque écran tactile (duoheat) sur sa dalle
+SUBSYSTEM=="input", ATTRS{name}=="Surface Duo Touch A", ENV{WL_OUTPUT}="DSI-1", ENV{ID_INPUT_TOUCHSCREEN}="1"
+SUBSYSTEM=="input", ATTRS{name}=="Surface Duo Touch B", ENV{WL_OUTPUT}="DSI-2", ENV{ID_INPUT_TOUCHSCREEN}="1"

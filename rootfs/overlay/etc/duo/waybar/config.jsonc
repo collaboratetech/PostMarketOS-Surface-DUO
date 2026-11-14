@@ -1,0 +1,23 @@
+// Surface Duo, mode portable : barre fine des applis ouvertes sur l'écran du bas, au-dessus du grand clavier
+{
+    "output": "DSI-2",
+    "layer": "top",
+    "position": "top",
+    "height": 60,
+    "spacing": 8,
+    "modules-left": ["wlr/taskbar"],
+    "modules-right": ["clock"],
+    "wlr/taskbar": {
+        "format": "{icon} {title:.18}",
+        "icon-size": 34,
+        "all-outputs": true,
+        "tooltip": false,
+        "on-click": "activate",
+        "on-click-middle": "close",
+        "ignore-list": ["Phosh", "phosh"]
+    },
+    "clock": {
+        "format": "{:%H:%M}",
+        "tooltip": false
+    }
+}

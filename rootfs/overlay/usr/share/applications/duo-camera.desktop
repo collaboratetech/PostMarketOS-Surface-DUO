@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Caméra
+Comment=Caméra du Surface Duo : image en direct et photos
+Exec=/usr/local/bin/duo-camera-tournee
+Icon=duo-camera
+Terminal=false
+Categories=Graphics;Photography;
+StartupWMClass=matrix-camera

@@ -1,0 +1,28 @@
+/* Barre des applis du mode portable : fine, sombre, arrondie, comme Phosh */
+* {
+    font-family: "Cantarell", "Inter", sans-serif;
+    font-size: 17px;
+    border: none;
+    min-height: 0;
+}
+window#waybar {
+    background: #1e1e1e;
+    color: #ffffff;
+}
+#taskbar {
+    margin: 6px 6px;
+}
+#taskbar button {
+    background: #303030;
+    color: #ffffff;
+    border-radius: 12px;
+    padding: 2px 14px;
+    margin: 0 4px;
+}
+#taskbar button.active {
+    background: #3584e4;
+}
+#clock {
+    padding: 0 16px;
+    font-weight: bold;
+}

@@ -1,0 +1,40 @@
+#!/bin/sh
+# Accessoires USB (clé, clavier, souris, carte son, manette…) : le port USB-C du Duo passe en mode HÔTE quand un
+# accessoire est branché (adaptateur OTG : le Duo est alors « source », typec_mode = « Sink attached »), et revient en
+# mode PÉRIPHÉRIQUE pour un chargeur ou un PC (« Source attached ») ou à vide. Le noyau a déjà les pilotes
+# (xHCI, usb-storage, HID, son USB). Les clés / disques USB sont montés dans ~/USB/<nom> (visible dans Fichiers)
+# et démontés quand on les retire (pas de moniteur udisks2 de gvfs dans Alpine).
+M=/sys/devices/platform/soc/a600000.ssusb/mode
+T=/sys/class/power_supply/usb/typec_mode
+[ -w $M ] || exit 0
+avant=""
+while true; do
+	tc=$(cat $T 2>/dev/null)
+	case "$tc" in
+		*"Sink attached"*|*"Audio Adapter"*|*"Powered cable"*) voulu=host ;;
+		*) voulu=peripheral ;;
+	esac
+	if [ "$voulu" != "$avant" ] && [ "$(cat $M)" != "$voulu" ] && [ "$(cat $M)" != none ]; then
+		echo $voulu > $M && echo "$(date '+%H:%M:%S') port USB : $voulu ($tc)" >> /tmp/duo-usb.log
+	fi
+	avant=$voulu
+	# clés / disques USB : montage automatique dans /root/USB (dossier personnel)
+	for b in /sys/class/block/sd*; do
+		readlink -f $b | grep -q "/usb" || continue
+		n=${b##*/}; [ -e $b/partition ] || [ ! -d $b/${n}1 ] || continue   # disque partitionné : on monte ses partitions
+		c=/r/root/USB/$n
+		grep -q " $c " /proc/mounts && continue
+		[ -e /dev/$n ] || mknod /dev/$n b $(tr ':' ' ' < $b/dev)
+		mkdir -p $c
+		if mount -o noatime /dev/$n $c 2>/dev/null || mount -t vfat -o noatime,utf8 /dev/$n $c 2>/dev/null || mount -t exfat /dev/$n $c 2>/dev/null; then
+			echo "$(date '+%H:%M:%S') clé USB $n montée dans ~/USB/$n" >> /tmp/duo-usb.log
+		else
+			rmdir $c 2>/dev/null
+		fi
+	done
+	for c in $(awk '$2 ~ "^/r/root/USB/" {print $2}' /proc/mounts); do
+		[ -e /sys/class/block/${c##*/} ] && continue
+		umount -l $c; rmdir $c 2>/dev/null; echo "$(date '+%H:%M:%S') clé USB ${c##*/} retirée" >> /tmp/duo-usb.log
+	done
+	sleep 2
+done

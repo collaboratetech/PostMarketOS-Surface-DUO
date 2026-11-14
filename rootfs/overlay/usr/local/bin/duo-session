@@ -1,0 +1,7 @@
+#!/bin/sh
+# lancé dans le chroot : udev + sway
+export XDG_RUNTIME_DIR=/tmp/xdg HOME=/root
+mkdir -p $XDG_RUNTIME_DIR; chmod 700 $XDG_RUNTIME_DIR
+export WLR_RENDERER=pixman LIBSEAT_BACKEND=noop MOZ_ENABLE_WAYLAND=1 XDG_CURRENT_DESKTOP=sway
+udevd --daemon 2>/dev/null; udevadm trigger; udevadm settle -t 5
+exec sway -c /etc/duo/sway.config > /tmp/sway.log 2>&1

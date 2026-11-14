@@ -1,0 +1,115 @@
+#!/bin/sh
+# duo-donnees : données mobiles (4G) du Surface Duo sous Linux.
+# ModemManager ne sait pas utiliser le chemin de données IPA du noyau Android (« Unsupported QMI kernel driver
+# for net/rmnet_ipa0 ») : on fait le travail de netmgrd d'Android à la main :
+#   1. noyau : formats QMAP + canal 1 sur rmnet_ipa0 (duo-ipa-data), interface rmnet_data0 (rmnet, mux 1)
+#   2. modem (QMI sur qrtr) : DPM open-port (tuyaux IPA), WDA data-format QMAP, WDS bind mux 1, start-network
+#   3. adresse/route/DNS donnés par le modem sur rmnet_data0 (route moins prioritaire que le Wi-Fi)
+# Interrupteur : Paramètres > Réseau mobile > « Données mobiles » (radio WWAN de NetworkManager).
+# APN : celui coché dans Paramètres > Réseau mobile > Points d'accès (connexion gsm automatique),
+#       ou /root/.config/duo/apn s'il existe, sinon sl2sfr (SFR / Réglo Mobile).
+# Journal : /tmp/duo-donnees.log
+Q="qmicli -d qrtr://0 -p"
+D=/run/duo/donnees; mkdir -p $D
+log() { echo "$(date '+%H:%M:%S') $*" >> /tmp/duo-donnees.log; }
+
+apn() {
+	[ -s /root/.config/duo/apn ] && { cat /root/.config/duo/apn; return; }
+	# point d'accès coché dans les Paramètres = connexion gsm en connexion automatique
+	c=$(nmcli -t -f NAME,TYPE,AUTOCONNECT connection show 2>/dev/null | grep ':gsm:yes$' | head -1 | sed 's/:gsm:yes$//')
+	a=""; [ -n "$c" ] && a=$(nmcli -g gsm.apn connection show "$c" 2>/dev/null)
+	echo "${a:-sl2sfr}"
+}
+
+voulu() { [ "$(nmcli radio wwan 2>/dev/null)" = "enabled" ]; }
+inscrit() { mmcli -m any 2>/dev/null | grep -q -E "state: (registered|connected)"; }
+connecte() { [ -s $D/handle ] && $Q --wds-get-packet-service-status --client-cid=$(cat $D/cid) --client-no-release-cid 2>/dev/null | grep -q "'connected'"; }
+
+preparer() {   # une fois par démarrage du modem
+	[ -f $D/pret ] && return 0
+	ip link set rmnet_ipa0 up || return 1
+	/usr/local/bin/duo-ipa-data 1 rmnet_data0 > $D/ep 2>> /tmp/duo-donnees.log || return 1
+	set -- $(sed 's/[a-z]*=//g' $D/ep)            # epid cons prod
+	ip link show rmnet_data0 > /dev/null 2>&1 || ip link add link rmnet_ipa0 name rmnet_data0 type rmnet mux_id 1
+	$Q --dpm-open-port="hw-data-ep-type=embedded,hw-data-ep-iface-number=$1,hw-data-rx-id=$2,hw-data-tx-id=$3" \
+		>> /tmp/duo-donnees.log 2>&1 || return 1
+	$Q --wda-set-data-format="ep-type=embedded,ep-iface-number=$1,link-layer-protocol=raw-ip,ul-protocol=qmap,dl-protocol=qmap,dl-max-datagrams=32,dl-datagram-max-size=16384" \
+		> /dev/null 2>> /tmp/duo-donnees.log || return 1
+	cid=$($Q --wds-noop --client-no-release-cid 2>&1 | grep -o "CID: '[0-9]*'" | grep -o "[0-9]*")
+	[ -n "$cid" ] || return 1
+	echo $cid > $D/cid
+	$Q --wds-bind-mux-data-port="mux-id=1,ep-iface-number=$1,ep-type=embedded" --client-cid=$cid --client-no-release-cid \
+		> /dev/null 2>> /tmp/duo-donnees.log || return 1
+	touch $D/pret; log "chemin de données prêt (epid $1, tuyaux $2/$3, client WDS $cid)"
+}
+
+monter() {
+	a=$(apn)
+	r=$($Q --wds-start-network="apn=$a,ip-type=4" --client-cid=$(cat $D/cid) --client-no-release-cid 2>&1)
+	h=$(echo "$r" | grep -o "handle: '[0-9]*'" | grep -o "[0-9]*")
+	[ -n "$h" ] || { log "échec de connexion (APN $a) : $(echo "$r" | head -1)"; return 1; }
+	echo $h > $D/handle
+	s=$($Q --wds-get-current-settings --client-cid=$(cat $D/cid) --client-no-release-cid 2>&1)
+	adr=$(echo "$s" | sed -n "s/.*IPv4 address: //p"); gw=$(echo "$s" | sed -n "s/.*IPv4 gateway address: //p")
+	m=$(echo "$s" | sed -n "s/.*IPv4 subnet mask: //p")
+	d1=$(echo "$s" | sed -n "s/.*IPv4 primary DNS: //p"); d2=$(echo "$s" | sed -n "s/.*IPv4 secondary DNS: //p")
+	mtu=$(echo "$s" | sed -n "s/.*MTU: //p")
+	p=0; for o in $(echo $m | tr . ' '); do while [ $o -gt 0 ]; do p=$((p + (o & 1))); o=$((o >> 1)); done; done
+	ip addr flush dev rmnet_data0
+	ip addr add $adr/$p dev rmnet_data0
+	ip link set rmnet_data0 mtu ${mtu:-1500} up
+	ip route replace default via $gw dev rmnet_data0 metric 700
+	echo "$d1 $d2" > $D/dns
+	log "connecté en 4G : APN $a, adresse $adr/$p, passerelle $gw, DNS $d1 $d2"
+}
+
+descendre() {
+	[ -s $D/handle ] && $Q --wds-stop-network=$(cat $D/handle) --client-cid=$(cat $D/cid) --client-no-release-cid > /dev/null 2>&1
+	rm -f $D/handle
+	ip route del default dev rmnet_data0 2>/dev/null
+	ip addr flush dev rmnet_data0 2>/dev/null
+	log "données mobiles coupées"
+}
+
+dns() {   # sans Wi-Fi, NetworkManager ne connaît pas nos DNS : on les écrit nous-mêmes
+	[ -s $D/handle ] || return
+	if ip route show default | grep -q -v rmnet_data0; then return; fi
+	set -- $(cat $D/dns)
+	grep -q "nameserver $1" /etc/resolv.conf 2>/dev/null && return
+	{ echo "# duo-donnees (4G)"; for n in "$@"; do echo "nameserver $n"; done; } > /etc/resolv.conf
+}
+
+# ModemManager perd parfois le modem au réveil de la veille (« No modems were found ») alors que le modem
+# répond toujours : on lui refait découvrir le port (même déclencheur udev qu'au démarrage, cf. duo-wifi)
+sans_modem=0
+surveiller_modem() {
+	if mmcli -L 2>/dev/null | grep -q "/Modem/"; then sans_modem=0; return; fi
+	sans_modem=$((sans_modem + 1))
+	if [ $sans_modem -ge 3 ]; then
+		log "ModemManager ne voit plus le modem : nouvelle détection"
+		udevadm trigger --action=add /sys/class/net/rmnet_ipa0 2>/dev/null
+		rm -f $D/pret $D/handle
+		sans_modem=0
+	fi
+}
+
+# partage de connexion (point d'accès Wi-Fi de NetworkManager, réseau 10.42.0.0/24) : NetworkManager ne pose pas
+# la traduction d'adresses ici (noyau Android sans nftables) -> règle iptables « legacy » posée une fois
+echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null
+iptables -t nat -C POSTROUTING -s 10.42.0.0/24 ! -d 10.42.0.0/24 -j MASQUERADE 2>/dev/null || 	iptables -t nat -A POSTROUTING -s 10.42.0.0/24 ! -d 10.42.0.0/24 -j MASQUERADE 2>/dev/null
+
+rm -f $D/pret $D/handle
+log "démarrage"
+while true; do
+	surveiller_modem
+	if voulu && inscrit; then
+		if ! connecte; then
+			rm -f $D/handle
+			preparer && monter || rm -f $D/pret
+		fi
+		dns
+	elif [ -s $D/handle ]; then
+		descendre
+	fi
+	sleep 10
+done

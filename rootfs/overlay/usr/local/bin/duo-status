@@ -1,0 +1,22 @@
+#!/bin/sh
+# barre sway (protocole i3bar) avec boutons tactiles : Clavier / Applis / Fermer
+handle() {
+  while read -r l; do
+    case "$l" in
+      *'"name":"kbd"'*|*'"name": "kbd"'*) pkill -RTMIN wvkbd-mobintl ;;
+      *'"name":"apps"'*|*'"name": "apps"'*) pidof wofi >/dev/null && pkill wofi || wofi --show drun -I -s /etc/duo/wofi.css -W 640 -H 820 >/dev/null 2>&1 & ;;
+      *'"name":"close"'*|*'"name": "close"'*) swaymsg kill >/dev/null ;;
+    esac
+  done
+}
+handle &
+echo '{"version":1,"click_events":true}'
+echo '['
+while true; do
+  b=$(cat /sys/class/power_supply/battery/capacity 2>/dev/null)
+  printf '[{"name":"kbd","full_text":"  ⌨ Clavier  ","background":"#1f4e79","separator_block_width":12},'
+  printf '{"name":"apps","full_text":"  ☰ Applis  ","background":"#2e6b3a","separator_block_width":12},'
+  printf '{"name":"close","full_text":"  ✕ Fermer  ","background":"#7a2a2a","separator_block_width":24},'
+  printf '{"name":"info","full_text":"%s%s"}],\n' "${b:+bat $b%   }" "$(date +%H:%M)"
+  sleep 5
+done

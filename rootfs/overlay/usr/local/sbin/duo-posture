@@ -1,0 +1,449 @@
+#!/usr/bin/python3 -I
+"""duo-posture : postures du Surface Duo 1 sous Phosh (capteurs du DSP SLPI via ssccli/libssc + hexagonrpcd).
+D'après la logique de duo-haltung (Matrix), réécrite pour Phosh :
+  fermé (CLOSED stable 1 s)   -> écrans éteints comme la touche Power (Mutter PowerSaveMode 3), tactile muet
+  rouvert                     -> écrans rallumés (PowerSaveMode 0)
+  replié (FLIP_*)             -> seul l'écran face à soi reste allumé ; rétroéclairage et tactile de l'autre coupés
+                                 (sans couper la sortie vidéo : le pilote SDE fait du bruit quand on la rallume)
+  autres postures             -> deux écrans
+L'écran face à soi : gravité vue par l'accéléromètre (dans le panneau B = DSI-2) : z > 3 -> B, z < -3 -> A ;
+sinon la posture du firmware (FLIP_*_RIGHT -> B, FLIP_*_LEFT -> A).
+Remplace aussi duo-blmirror : luminosité du panneau 0 recopiée sur le panneau 1."""
+import os, re, selectors, subprocess, sys, time
+
+NOMS = {0: "CLOSED", 1: "PEEK_RIGHT", 2: "PEEK_LEFT", 3: "READ", 4: "COMPOSE", 5: "OPEN_DUAL_PORTRAIT",
+        6: "OPEN_DUAL_LANDSCAPE", 7: "BROCHURE_RIGHT", 8: "TENT_RIGHT", 9: "FLIP_P_RIGHT", 10: "FLIP_L_RIGHT",
+        11: "FLIP_P_LEFT", 12: "FLIP_L_LEFT", 13: "BROCHURE_LEFT", 14: "TENT_LEFT", 15: "RAMP_RIGHT", 16: "RAMP_LEFT",
+        99: "UNDETERMINED"}
+REPLIE_B, REPLIE_A = {9, 10}, {11, 12}
+BL = "/sys/class/backlight/%s-backlight/%s"
+PANNEAU = {"DSI-1": "panel0", "DSI-2": "panel1"}
+TOUCHE = {"DSI-1": "A", "DSI-2": "B"}
+
+
+def log(m):
+    print("duo-posture: " + m, flush=True)
+
+
+def lire(p, d=None):
+    try:
+        with open(p) as f:
+            return f.read().strip()
+    except OSError:
+        return d
+
+
+def ecrire(p, v):
+    try:
+        with open(p, "w") as f:
+            f.write(str(v))
+    except OSError as e:
+        log("écriture %s : %s" % (p, e))
+
+
+def muet(lettre, oui):
+    os.makedirs("/run/duo", exist_ok=True)
+    p = "/run/duo/mute-" + lettre
+    if oui:
+        open(p, "w").close()
+    elif os.path.exists(p):
+        os.unlink(p)
+
+
+def bus_session():
+    """Adresse D-Bus de la session Phosh (lue dans l'environnement du processus phosh)."""
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            if lire("/proc/%s/comm" % pid) != "phosh":
+                continue
+            for kv in open("/proc/%s/environ" % pid, "rb").read().split(b"\0"):
+                if kv.startswith(b"DBUS_SESSION_BUS_ADDRESS="):
+                    return kv.split(b"=", 1)[1].decode()
+        except OSError:
+            pass
+    return None
+
+
+def wl(*args):
+    """wlr-randr sur la session phoc (protocole wlr-output-management)"""
+    env = dict(os.environ, XDG_RUNTIME_DIR="/run/user/0", WAYLAND_DISPLAY="wayland-0")
+    r = subprocess.run(["wlr-randr", *args], env=env, capture_output=True, text=True, timeout=8)
+    log("wlr-randr %s%s" % (" ".join(args), "" if r.returncode == 0 else " : " + r.stderr.strip()[:100]))
+
+
+def env_session():
+    return dict(os.environ, XDG_RUNTIME_DIR="/run/user/0", WAYLAND_DISPLAY="wayland-0",
+                DBUS_SESSION_BUS_ADDRESS=bus_session() or "")
+
+
+def reglage_session(schema, cle, valeur):
+    subprocess.run(["gsettings", "set", schema, cle, valeur], env=env_session(), capture_output=True, timeout=8)
+
+
+def relancer_clavier():
+    """squeekboard garde sa surface (et donc son écran) une fois créée : on le relance pour qu'il en recrée une
+    sur l'écran voulu (lu par phoc dans /run/duo/clavier-ecran)"""
+    for pid in os.listdir("/proc"):
+        if pid.isdigit() and lire("/proc/%s/comm" % pid) == "squeekboard":
+            try:
+                os.kill(int(pid), 15)
+            except OSError:
+                pass
+    time.sleep(0.5)
+    subprocess.Popen(["squeekboard"], env=dict(env_session(), HOME="/root"), stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True, cwd="/root")
+
+
+def barre_taches(ecran):
+    """Waybar (barre des applis ouvertes) sur l'écran du bas (ecran = DSI-1/DSI-2), seulement en mode portable ;
+    None = arrêt. La configuration est recopiée dans /run/duo avec la bonne sortie."""
+    for pid in os.listdir("/proc"):
+        if pid.isdigit() and lire("/proc/%s/comm" % pid) == "waybar":
+            try:
+                os.kill(int(pid), 15)
+            except OSError:
+                pass
+    if ecran:
+        try:
+            conf = open("/etc/duo/waybar/config.jsonc").read().replace('"output": "DSI-2"', '"output": "%s"' % ecran)
+            ecrire("/run/duo/waybar.jsonc", conf)
+        except OSError:
+            pass
+        subprocess.Popen(["waybar", "-c", "/run/duo/waybar.jsonc", "-s", "/etc/duo/waybar/style.css"],
+                         env=env_session(), stdout=open("/tmp/waybar.log", "w"), stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+
+
+def economie(mode):
+    bus = bus_session()
+    if not bus:
+        log("pas de session Phosh")
+        return
+    env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=bus)
+    subprocess.run(["gdbus", "call", "--session", "--dest", "org.gnome.Mutter.DisplayConfig", "--object-path",
+                    "/org/gnome/Mutter/DisplayConfig", "--method", "org.freedesktop.DBus.Properties.Set",
+                    "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", "<int32 %d>" % mode],
+                   env=env, capture_output=True, timeout=8)
+
+
+class Posture:
+    def __init__(self):
+        self.mode = "deux"          # deux | DSI-1 | DSI-2 | ferme
+        ecrire("/run/duo/mode", "deux")
+        self.az = 0.0
+        self.ax = self.ay = 0.0
+        self.port_cand, self.port_depuis, self.port_actif = None, 0.0, None
+        self.posture = None
+        self.depuis = 0.0           # instant où la posture brute actuelle est apparue
+        self.debut_flux = time.monotonic()
+        self.lum = None
+        self.coupee = None          # sortie vidéo coupée en mode replié (DSI-1 / DSI-2)
+
+    def face(self):
+        if self.az > 3.0:
+            return "DSI-2"
+        if self.az < -3.0:
+            return "DSI-1"
+        if self.mode in ("DSI-1", "DSI-2"):
+            return self.mode
+        return "DSI-2" if self.posture in REPLIE_B else "DSI-1"
+
+    def voulu(self):
+        p = self.posture
+        if p == 0:
+            # un flux qui démarre annonce d'abord CLOSED : on attend 2 s, puis 1 s de stabilité
+            if time.monotonic() - self.debut_flux < 2 or time.monotonic() - self.depuis < 1:
+                return self.mode
+            return "ferme"
+        if p in REPLIE_A or p in REPLIE_B:
+            return self.face()
+        if p is None or p == 99:
+            return self.mode
+        return "deux"
+
+    def appliquer(self, v):
+        if v == self.mode:
+            return
+        log("%s -> %s (posture %s, z=%.1f)" % (self.mode, v, NOMS.get(self.posture, self.posture), self.az))
+        ancien, self.mode = self.mode, v
+        ecrire("/run/duo/mode", v)   # lu par duo-retour : bord côté charnière ignoré quand les deux écrans servent
+        if v == "ferme":
+            muet("A", True); muet("B", True)
+            economie(3)
+            return
+        if ancien == "ferme":
+            economie(0)
+            time.sleep(0.5)
+        if v == "deux":
+            muet("A", False); muet("B", False)
+            for p in PANNEAU.values():
+                ecrire(BL % (p, "bl_power"), 0)
+            # sortie coupée en mode replié -> rallumée ; si c'était DSI-1, Phosh était passé sur DSI-2 :
+            # on fait « clignoter » DSI-2 pour qu'il revienne sur DSI-1 (son écran habituel)
+            if self.coupee:
+                wl("--output", self.coupee, "--on", "--scale", "2", "--pos", "0,0" if self.coupee == "DSI-1" else "675,0")
+                if self.coupee == "DSI-1":
+                    time.sleep(1)
+                    wl("--output", "DSI-2", "--off"); time.sleep(1.5)
+                    wl("--output", "DSI-2", "--on", "--scale", "2", "--pos", "675,0")
+                self.coupee = None
+        else:
+            dos = "DSI-1" if v == "DSI-2" else "DSI-2"
+            muet(TOUCHE[v], False); muet(TOUCHE[dos], True)
+            ecrire(BL % (PANNEAU[v], "bl_power"), 0)
+            ecrire(BL % (PANNEAU[dos], "bl_power"), 4)
+            # sortie de l'écran de dos vraiment coupée : Phosh (barre du haut, accueil) passe sur l'écran de face
+            if self.coupee and self.coupee != dos:
+                wl("--output", self.coupee, "--on", "--scale", "2", "--pos", "0,0")
+                time.sleep(1)
+            wl("--output", dos, "--off")
+            self.coupee = dos
+        # le clavier (squeekboard) garde sa surface sur l'écran où il est né : si cet écran vient d'être coupé,
+        # il ne réapparaît plus -> relancé à chaque pliage/dépliage pour qu'il suive l'écran utilisé
+        time.sleep(0.5)
+        relancer_clavier()
+
+    PORTABLE_ECRAN = "/run/duo/clavier-ecran"   # lu par phoc (patch clavier_ecran.py) : écran imposé au clavier
+
+    def portable(self):
+        """Posture « portable » (comme Matrix) : Duo ouvert en L, posé comme un PC portable, deux écrans actifs.
+        Deux sens (calibrés le 12/11 avec l'accéléromètre du panneau B = DSI-2, écran caméra) :
+          - « B » : écran caméra (B) posé à plat face vers le haut (z > 7) -> A en haut, B en bas, rotation 90
+          - « A » : écran sans caméra (A) posé à plat, B levé comme un écran de PC (x > 6, posture COMPOSE)
+                    -> B en haut, A en bas, rotation 270
+        -> appli en paysage sur l'écran du haut ; barre des applis + grand clavier sur l'écran du bas.
+        En portrait, rien d'imposé : le clavier suit l'écran de l'appli utilisée (comportement normal de phoc).
+        Sens réglables : /etc/duo/portable-transform (90) et /etc/duo/portable-transform-inverse (270)."""
+        plat = max(abs(self.ax), abs(self.ay)) < 4.5 and self.az > 7.0
+        debout = self.ax > 6.0 and abs(self.ay) < 4.5
+        voulu = None
+        if self.mode == "deux" and self.posture in (3, 4, 6) and plat:
+            voulu = "B"
+        elif self.mode == "deux" and self.posture in (3, 4) and debout:
+            voulu = "A"
+        now = time.monotonic()
+        if voulu != self.port_cand:
+            self.port_cand, self.port_depuis = voulu, now
+            return
+        if now - self.port_depuis < 1.0 or voulu == self.port_actif:
+            return
+        self.port_actif = voulu
+        if voulu:
+            if voulu == "B":
+                t = lire("/etc/duo/portable-transform", "90") or "90"
+                haut, bas = "DSI-1", "DSI-2"
+            else:
+                t = lire("/etc/duo/portable-transform-inverse", "270") or "270"
+                haut, bas = "DSI-2", "DSI-1"
+            wl("--output", haut, "--transform", t, "--pos", "0,0")
+            wl("--output", bas, "--transform", t, "--pos", "0,675")
+            ecrire(self.PORTABLE_ECRAN, "%s 615" % bas)   # écran + hauteur du clavier (675 - 60 de la barre)
+            reglage_session("sm.puri.Squeekboard", "scale-in-horizontal-screen-orientation", "2.0")  # clavier sur tout l'écran du bas (2.0 = maximum autorisé)
+            barre_taches(bas)
+            relancer_clavier()
+            log("mode portable (%s en bas) : paysage, barre des applis + grand clavier sur l'écran du bas" % bas)
+        else:
+            try:
+                os.unlink(self.PORTABLE_ECRAN)
+            except FileNotFoundError:
+                pass
+            barre_taches(None)
+            reglage_session("sm.puri.Squeekboard", "scale-in-horizontal-screen-orientation", "1.2")
+            relancer_clavier()
+            if self.mode == "deux":
+                wl("--output", "DSI-1", "--transform", "normal", "--pos", "0,0")
+                wl("--output", "DSI-2", "--transform", "normal", "--pos", "675,0")
+            log("fin du mode portable")
+
+    def miroir(self):
+        """Luminosité réglée par Phosh (panneau 0) recopiée sur le panneau 1 ; en mode deux écrans, l'allumage aussi."""
+        b = lire(BL % ("panel0", "brightness"))
+        if b and b != self.lum and b != "0":
+            ecrire(BL % ("panel1", "brightness"), b)
+            self.lum = b
+        if self.mode == "deux":
+            p0 = lire(BL % ("panel0", "bl_power"))
+            if p0 is not None and p0 != lire(BL % ("panel1", "bl_power")):
+                ecrire(BL % ("panel1", "bl_power"), p0)
+
+
+class Rotation:
+    """Rotation automatique des écrans via wlr-randr (protocole wlr-output-management de phoc).
+    DÉSACTIVÉE tant que /etc/duo/rotation.conf n'existe pas : le repère de l'accéléromètre (panneau B) par rapport
+    aux écrans doit d'abord être mesuré. Format (JSON) :
+      {"axes": {"+y": "normal", "-y": "180", "+x": "gauche", "-x": "droite"},
+       "transform": {"normal": "normal", "180": "180", "droite": "90", "gauche": "270"},
+       "seuil": 6.0}
+    Orientation = sens dans lequel l'appareil est tourné ; disposition : normal = A|B côte à côte, 180 = B|A,
+    droite (tourné horaire) = A au-dessus de B, gauche = B au-dessus de A. Verrou : fichier /run/duo/rotation-verrou."""
+    CONF = "/etc/duo/rotation.conf"
+    L, H = 675, 900          # taille logique d'un panneau en portrait (1350x1800 à l'échelle 2)
+
+    def __init__(self):
+        self.conf = None
+        try:
+            import json
+            with open(self.CONF) as f:
+                self.conf = json.load(f)
+            log("rotation activée")
+        except (OSError, ValueError):
+            log("rotation désactivée (pas de %s)" % self.CONF)
+        self.ori, self.cand, self.cand_depuis, self.cle = "normal", None, 0.0, None
+        self.mode_vu, self.mode_depuis = "deux", 0.0
+
+    def mesure(self, ax, ay):
+        if not self.conf or os.path.exists("/run/duo/rotation-verrou"):
+            return
+        s = self.conf.get("seuil", 6.0)
+        if abs(ay) >= abs(ax) and abs(ay) > s:
+            o = self.conf["axes"]["+y" if ay > 0 else "-y"]
+        elif abs(ax) > s:
+            o = self.conf["axes"]["+x" if ax > 0 else "-x"]
+        else:
+            return                       # à plat ou entre deux : on garde l'orientation actuelle
+        if o != self.cand:
+            self.cand, self.cand_depuis = o, time.monotonic()
+        elif time.monotonic() - self.cand_depuis > 0.8:
+            self.ori = o
+
+    def appliquer(self, mode):
+        if not self.conf or mode == "ferme":
+            return
+        # juste après un pliage/dépliage, phoc vient de couper/rallumer une sortie : reconfigurer aussitôt
+        # l'a fait planter (12/11) -> on attend 2 s de stabilité avant de tourner
+        if mode != self.mode_vu:
+            self.mode_vu, self.mode_depuis = mode, time.monotonic()
+        if time.monotonic() - self.mode_depuis < 2.0:
+            return
+        ori = self.ori
+        if mode == "DSI-1" and ori in ("droite", "gauche"):
+            ori = "gauche" if ori == "droite" else "droite"   # replié, écran A devant : le capteur (dans B) est vu de dos
+        cle = (ori, mode)
+        if cle == self.cle:
+            return
+        t = self.conf["transform"][ori]
+        paysage = ori in ("droite", "gauche")
+        w, h = (self.H, self.L) if paysage else (self.L, self.H)
+        if mode in ("DSI-1", "DSI-2"):
+            pos = {mode: (0, 0)}
+        else:
+            ordre = ["DSI-1", "DSI-2"] if ori in ("normal", "droite") else ["DSI-2", "DSI-1"]
+            pos = {ordre[0]: (0, 0), ordre[1]: (0, h) if paysage else (w, 0)}
+        env = dict(os.environ, XDG_RUNTIME_DIR="/run/user/0", WAYLAND_DISPLAY=os.environ.get("WAYLAND_DISPLAY", "wayland-0"))
+        # état réel des sorties (le pliage et le mode portable en changent aussi) : on n'envoie que la différence ;
+        # écran seul : sa position ne compte pas, seule la rotation est changée
+        actuel = {}
+        try:
+            import json
+            r = subprocess.run(["wlr-randr", "--json"], env=env, capture_output=True, text=True, timeout=8)
+            for o in json.loads(r.stdout):
+                actuel[o["name"]] = (o.get("enabled"), o.get("transform"), (o.get("position") or {}).get("x"),
+                                     (o.get("position") or {}).get("y"))
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
+        args = ["wlr-randr"]
+        for out, (x, y) in pos.items():
+            en, tr, ax_, ay_ = actuel.get(out, (True, None, None, None))
+            if not en:
+                continue
+            seul = mode in ("DSI-1", "DSI-2")
+            if tr == t and (seul or (ax_, ay_) == (x, y)):
+                continue
+            args += ["--output", out, "--transform", t] + ([] if seul else ["--pos", "%d,%d" % (x, y)])
+        self.cle = cle
+        if len(args) == 1:
+            return
+        r = subprocess.run(args, env=env, capture_output=True, text=True, timeout=8)
+        log("rotation %s (%s) : %s" % (ori, mode, "ok" if r.returncode == 0 else r.stderr.strip()[:120]))
+        self.cle = cle
+
+
+
+
+def lie_au_parent():
+    """le flux ssccli meurt avec le service (sinon des flux orphelins gardent la puce éveillée)"""
+    import ctypes
+    ctypes.CDLL(None).prctl(1, 15)    # PR_SET_PDEATHSIG = SIGTERM
+
+
+def flux(capteur):
+    return subprocess.Popen(["/usr/local/bin/ssccli", "--sensor", capteur, "--timeout", "864000"],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                            preexec_fn=lie_au_parent)
+
+
+def main():
+    for pid in os.listdir("/proc"):      # duo-blmirror remplacé par miroir() (pas de pkill dans le système)
+        if pid.isdigit() and lire("/proc/%s/comm" % pid) == "duo-blmirror":
+            try:
+                os.kill(int(pid), 15)
+            except OSError:
+                pass
+    etat = Posture()
+    rot = Rotation()
+    barre_ecrite = [None]
+    clavier_ecran = [None]
+    while True:
+        etat.debut_flux = time.monotonic()
+        p, a = flux("posture"), flux("accelerometer")
+        sel = selectors.DefaultSelector()
+        sel.register(p.stdout, selectors.EVENT_READ, "posture")
+        sel.register(a.stdout, selectors.EVENT_READ, "accel")
+        log("flux capteurs démarrés")
+        while p.poll() is None:
+            # veille (duo-veille) : l'accéléromètre réveillerait la puce en continu -> coupé pendant le repos ;
+            # la posture reste (elle ne parle qu'au changement : ouvrir le Duo peut le réveiller)
+            repos = os.path.exists("/run/duo/repos")
+            if repos and a is not None:
+                sel.unregister(a.stdout); a.kill(); a.wait(); a = None
+                log("repos : accéléromètre coupé")
+            elif not repos and a is None:
+                a = flux("accelerometer"); sel.register(a.stdout, selectors.EVENT_READ, "accel")
+                log("fin du repos : accéléromètre relancé")
+            for cle, _ in sel.select(timeout=0.2):
+                ligne = cle.fileobj.readline()
+                if not ligne:
+                    continue
+                if cle.data == "posture":
+                    m = re.match(r"Posture sensor measurement: (\d+)", ligne)
+                    if m:
+                        v = int(m.group(1))
+                        if v != etat.posture:
+                            etat.posture, etat.depuis = v, time.monotonic()
+                else:
+                    m = re.search(r"X=(-?[\d.]+) Y=(-?[\d.]+) Z=(-?[\d.]+)", ligne)
+                    if m:
+                        etat.ax, etat.ay, etat.az = float(m.group(1)), float(m.group(2)), float(m.group(3))
+                        rot.mesure(etat.ax, etat.ay)
+            etat.appliquer(etat.voulu())
+            avant = etat.port_actif
+            etat.portable()
+            if avant and not etat.port_actif:
+                rot.cle = None                  # fin du mode portable : la rotation est réappliquée
+            if not etat.port_actif:
+                rot.appliquer(etat.mode)
+            # dalle qui porte la barre de Phosh, en orientation normale (lue par duoheat : rejeu des appuis
+            # tout en haut sous la barre) ; vide si tournée ou en mode portable
+            # clavier : suit l'écran de la fenêtre active (écrit par phoc, patch clavier_suit.py)
+            ea = lire("/run/duo/ecran-actif")
+            if ea and ea != clavier_ecran[0]:
+                if clavier_ecran[0] is not None and not etat.port_actif and etat.mode == "deux":
+                    log("fenêtre active sur %s : clavier relancé sur cet écran" % ea)
+                    relancer_clavier()
+                clavier_ecran[0] = ea
+            b = "" if etat.port_actif or (rot.conf and rot.ori != "normal") else ("B" if etat.mode == "DSI-2" else "A")
+            if b != barre_ecrite[0]:
+                ecrire("/run/duo/barre", b)
+                barre_ecrite[0] = b
+            etat.miroir()
+        for x in (p, a):
+            if x is not None:
+                x.kill()
+        log("ssccli arrêté (rc %s), relance dans 3 s" % p.returncode)
+        time.sleep(3)
+
+
+if __name__ == "__main__":
+    main()

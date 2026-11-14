@@ -1,0 +1,15 @@
+#!/bin/sh
+# Surveille les appels ModemManager : audio d'appel allumé dès qu'un appel compose/sonne chez l'autre/est actif,
+# coupé quand il n'y a plus d'appel. Sortie choisie dans /run/duo-appel-sortie (hp par défaut, ou ecouteur).
+etat=off
+while :; do
+	l=$(mmcli -m any --voice-list-calls 2>/dev/null)
+	if echo "$l" | grep -qE '\((dialing|ringing-out|active)\)'; then voulu=on; else voulu=off; fi
+	if [ "$voulu" != "$etat" ]; then
+		if [ $voulu = on ]; then /usr/local/sbin/duo-appel-audio on "$(cat /run/duo-appel-sortie 2>/dev/null || echo hp)"
+		else /usr/local/sbin/duo-appel-audio off; fi
+		echo "$(date +%T) audio d'appel : $voulu" >&2
+		etat=$voulu
+	fi
+	sleep 1
+done

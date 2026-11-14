@@ -1,0 +1,49 @@
+#!/bin/sh
+# Audio d'appel du Surface Duo (codec Tavil, q6 voice) : relie le flux voix du modem (VoiceMMode1, PCM 2)
+# au haut-parleur (ou à l'écouteur) et au micro numérique 2, chemins repris de mixer_paths_tavil.xml d'Android.
+# Usage : duo-appel-audio on [hp|ecouteur] | off
+C=0
+m() { amixer -q -c $C cset name="$1" "$2" 2>/dev/null || echo "duo-appel-audio: échec $1" >&2; }
+case "$1" in
+on)
+	m 'SLIM_0_RX_Voice Mixer VoiceMMode1' 1
+	m 'VoiceMMode1_Tx Mixer SLIM_0_TX_MMode1' 1
+	m 'SLIM RX0 MUX' AIF1_PB
+	m 'CDC_IF RX0 MUX' 'SLIM RX0'
+	m 'SLIM_0_RX Channels' One
+	if [ "$2" = ecouteur ]; then
+		m 'RX INT0_1 MIX1 INP0' RX0
+		m 'EAR PA Gain' G_6_DB
+	else
+		m 'RX INT7_1 MIX1 INP0' RX0
+		m 'COMP7 Switch' 1
+		m 'SpkrLeft COMP Switch' 1
+		m 'SpkrLeft BOOST Switch' 1
+		m 'SpkrLeft VISENSE Switch' 1
+		m 'SpkrLeft SWR DAC_Port Switch' 1
+	fi
+	# micro : DMIC2 -> DEC7 -> SLIM TX7 (même micro que l'enregistrement)
+	m 'AIF1_CAP Mixer SLIM TX7' 1
+	m 'CDC_IF TX7 MUX' DEC7
+	m 'SLIM_0_TX Channels' One
+	m 'ADC MUX7' DMIC
+	m 'DMIC MUX7' DMIC2
+	m 'DEC7 Volume' 96
+	m 'Voice Rx Device Mute' '0 -1 20'
+	touch /run/duo/appel-en-cours        # les boutons de volume règlent alors le volume d'appel (duo-appel-volume)
+	/usr/local/sbin/duo-appel-volume applique
+	m 'Voice Tx Mute' '0 -1 500'
+	# flux « sans hôte » : il suffit de garder le PCM voix ouvert, le DSP fait le reste
+	pkill -f 'hw:0,2' 2>/dev/null
+	setsid arecord -q -D hw:0,2 -f S16_LE -r 8000 -c 1 -t raw /dev/null < /dev/null > /tmp/appel-rec.log 2>&1 &
+	setsid aplay -q -D hw:0,2 -f S16_LE -r 8000 -c 1 -t raw /dev/zero < /dev/null > /tmp/appel-play.log 2>&1 &
+	;;
+off)
+	rm -f /run/duo/appel-en-cours
+	pkill -f 'hw:0,2' 2>/dev/null
+	m 'SLIM_0_RX_Voice Mixer VoiceMMode1' 0
+	m 'VoiceMMode1_Tx Mixer SLIM_0_TX_MMode1' 0
+	m 'RX INT0_1 MIX1 INP0' ZERO
+	;;
+*) echo "usage: duo-appel-audio on [hp|ecouteur] | off"; exit 1 ;;
+esac

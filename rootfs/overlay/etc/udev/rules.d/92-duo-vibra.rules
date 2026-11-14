@@ -1,0 +1,2 @@
+# Surface Duo : feedbackd pilote le vibreur via le périphérique virtuel duo-vibra (pont vers le da7280, cf. duo-vibra.c)
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="duo-vibra", TAG+="uaccess", ENV{FEEDBACKD_TYPE}="vibra"

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Lampe torche
+Comment=Allume ou éteint la lampe du Surface Duo
+Exec=/usr/local/bin/duo-torche
+Icon=duo-torche
+Terminal=false
+Categories=Utility;

@@ -70,6 +70,22 @@ phone's partitions** (`modem`, `bluetooth`, `vendor`, `persist`), read-only.
 `./installer/duo.sh restore-android <your boot_b.img backup>` writes the stock boot image back from Linux.
 Android then starts from a fresh setup screen.
 
+## Known issues
+
+- **Lock screen:** enabling Phosh's lock screen makes the display driver crash (screens freeze or go black).
+  The lock screen is therefore **disabled** for now. Help welcome!
+- Camera preview in portrait is obtained by running the camera inside a rotated nested compositor
+  (controls end up on the side); direction set in `/etc/duo/camera-rotation`.
+- The USB network link to the PC can drop during big transfers (the installer sends data in verified chunks).
+- Touch: the outer columns of the left panel pull touches inwards; an edge stretch compensates (`DUO_X_STRETCH_*`).
+- Firefox shows a sandbox warning (old 4.14 kernel); Chromium runs with `--no-sandbox`.
+- Untested on real hardware yet: USB accessories, GPS outdoor fix, hotspot with a connected client.
+
+## Contributing
+
+This port is **open source** (GPL-3.0-or-later) and contributions are welcome: issues, pull requests, testing.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/BUILD.md`](docs/BUILD.md).
+
 ## Credits
 
 - [Matrix-Hardline/matrix-duo](https://github.com/Matrix-Hardline/matrix-duo) (GPL-3.0) — touch heat-map driver,
@@ -95,5 +111,9 @@ caméra, capteurs (postures de la charnière, rotation auto, mode PC portable) e
 - **Installer :** `./installer/duo.sh install`. Les micrologiciels propriétaires ne sont pas fournis : ils sont copiés
   depuis les partitions de **votre** téléphone, en lecture seule.
 - **Revenir à Android :** `./installer/duo.sh restore-android <sauvegarde boot_b.img>`.
+
+- **Problème connu :** activer l'écran de verrouillage de Phosh fait planter le pilote des écrans ; il est désactivé
+  pour l'instant. Toute aide est bienvenue.
+- **Projet open source (GPL-3.0)** : issues, pull requests et tests bienvenus, voir [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 Ce qui marche, comment ça marche et les remerciements : voir la partie anglaise ci-dessus.

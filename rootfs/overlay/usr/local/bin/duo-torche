@@ -1,0 +1,14 @@
+#!/bin/sh
+# Lampe torche du Surface Duo : bascule la LED du flash (led:torch_0 + interrupteur led:switch_0).
+# Phosh ne la reconnaît pas (il cherche une LED nommée « *:torch » / « *:flash »), d'où cette petite appli.
+# Usage : duo-torche [on|off]   (sans argument : bascule)
+T=/sys/class/leds/led:torch_0; S=/sys/class/leds/led:switch_0
+etat=$(cat $S/brightness 2>/dev/null || echo 0)
+voulu=${1:-$([ "$etat" -gt 0 ] && echo off || echo on)}
+if [ "$voulu" = on ]; then
+	cat $T/max_brightness > $T/brightness
+	echo 1 > $S/brightness
+else
+	echo 0 > $S/brightness
+	echo 0 > $T/brightness
+fi

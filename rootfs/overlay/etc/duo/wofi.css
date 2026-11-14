@@ -1,0 +1,5 @@
+window { background-color: #14202c; color: #e8eef4; font-size: 22px; border: 2px solid #3b6ea5; }
+#input { margin: 10px; padding: 10px; font-size: 22px; }
+#entry { padding: 18px 12px; border-bottom: 1px solid #22344a; }
+#entry:selected { background-color: #2e6b3a; }
+#img { margin-right: 16px; }

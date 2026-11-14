@@ -1,0 +1,3 @@
+# Surface Duo (noyau msm-4.14 downstream) : rmnet_ipa0 n'est rattaché à aucun pilote "ipa" côté udev ;
+# on le déclare comme port réseau du modem Qualcomm SoC pour que ModemManager l'associe au modem QMI (qrtr).
+SUBSYSTEM=="net", KERNEL=="rmnet_ipa0", ENV{ID_MM_QCOM_SOC}="1", ENV{ID_MM_PHYSDEV_UID}="qcom-soc", ENV{ID_MM_CANDIDATE}="1"

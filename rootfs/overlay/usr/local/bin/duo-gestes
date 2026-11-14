@@ -1,0 +1,12 @@
+#!/bin/sh
+# gestes de bord sur chaque écran tactile (lisgd)
+for name in "Surface Duo Touch A" "Surface Duo Touch B"; do
+  ev=$(awk -v n="$name" '/^N:/{f=index($0,n)>0} f&&/^H:/{match($0,/event[0-9]+/); print substr($0,RSTART,RLENGTH); exit}' /proc/bus/input/devices)
+  [ -n "$ev" ] || continue
+  lisgd -d /dev/input/$ev -t 100 -m 1200 \
+    -g "1,DU,B,*,R,pkill -RTMIN wvkbd-mobintl" \
+    -g "1,UD,T,*,R,pidof wofi || wofi --show drun -I -s /etc/duo/wofi.css -W 640 -H 820" \
+    -g "1,RL,R,*,R,swaymsg kill" \
+    -g "1,LR,L,*,R,swaymsg workspace back_and_forth" &
+done
+wait

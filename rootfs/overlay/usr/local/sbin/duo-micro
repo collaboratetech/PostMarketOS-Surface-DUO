@@ -1,0 +1,12 @@
+#!/bin/sh
+# Micro intégré du Surface Duo : DMIC2 -> DEC7 -> SLIM TX7 -> SLIM_0_TX -> MultiMedia1 en capture (hw:0,0).
+# Chemin « audio-record » de mixer_paths_tavil.xml ; DMIC2 et DEC7=96 mesurés comme les meilleurs par Matrix.
+C=0
+m() { amixer -q -c $C cset name="$1" "$2" 2>/dev/null || echo "duo-micro: échec $1" >&2; }
+m 'MultiMedia1 Mixer SLIM_0_TX' 1
+m 'AIF1_CAP Mixer SLIM TX7' 1
+m 'CDC_IF TX7 MUX' DEC7
+m 'SLIM_0_TX Channels' One
+m 'ADC MUX7' DMIC
+m 'DMIC MUX7' DMIC2
+m 'DEC7 Volume' 96

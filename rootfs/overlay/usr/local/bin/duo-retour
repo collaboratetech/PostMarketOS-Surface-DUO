@@ -1,0 +1,30 @@
+#!/bin/sh
+# Geste « Retour » (glisser depuis un bord latéral, comme sur Android) :
+#  - clavier visuel affiché -> on le ferme d'abord
+#  - sinon -> Alt+Gauche, la commande « Retour » des applis GNOME (pages des Paramètres, Fichiers...) et de Firefox
+# Usage (lancé par duo-ecrans / lisgd) : duo-retour ECRAN BORD
+#   ECRAN = A|B (dalle), BORD = gauche|droite|haut|bas dans le repère de la dalle (portrait).
+# Les bords « latéraux » vus par l'utilisateur dépendent de l'orientation de l'écran :
+#   normal / 180 -> gauche et droite de la dalle ; 90 / 270 (paysage, mode portable) -> haut et bas de la dalle
+#   (en portrait, le haut et le bas restent à Phosh : barre du haut et barre d'accueil).
+# Deux écrans ouverts en portrait : le bord côté charnière ne compte pas (droite de A, gauche de B), pour qu'un
+# doigt qui passe d'un écran à l'autre ne fasse pas « Retour ». État écrit par duo-posture : /run/duo/mode.
+mode=$(cat /run/duo/mode 2>/dev/null); mode=${mode:-deux}
+[ "$mode" = ferme ] && exit 0
+case "$1" in A) sortie=DSI-1 ;; *) sortie=DSI-2 ;; esac
+t=$(wlr-randr 2>/dev/null | awk -v o="$sortie" '$1==o{f=1;next} /^[^ ]/{f=0} f && /Transform:/{print $2; exit}')
+case "$t" in
+	90|270)
+		case "$2" in haut|bas) ;; *) exit 0 ;; esac ;;
+	*)
+		case "$2" in gauche|droite) ;; *) exit 0 ;; esac
+		[ "$mode" = deux ] && case "$1:$2" in A:droite|B:gauche) exit 0 ;; esac ;;
+esac
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+	export $(tr '\0' '\n' < /proc/$(pidof phosh | cut -d' ' -f1)/environ | grep '^DBUS_SESSION_BUS_ADDRESS=')
+fi
+if busctl --user get-property sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0 Visible 2>/dev/null | grep -q true; then
+	busctl --user call sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0 SetVisible b false
+else
+	/usr/local/bin/duo-key 56 105
+fi

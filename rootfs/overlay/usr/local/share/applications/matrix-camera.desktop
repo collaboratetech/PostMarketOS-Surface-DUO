@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Caméra
+Exec=/usr/local/bin/duo-camera
+Icon=duo-camera
+NoDisplay=true

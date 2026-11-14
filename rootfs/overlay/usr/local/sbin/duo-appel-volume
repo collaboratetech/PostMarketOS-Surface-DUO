@@ -1,0 +1,20 @@
+#!/bin/sh
+# Volume pendant un appel (boutons + / -, via duo-power) : gain voix du DSP (« Voice Rx Gain », pas 1 à 5),
+# sans toucher à PipeWire (régler PipeWire pendant un appel coupait le son dans les deux sens, 12/11).
+# Usage : duo-appel-volume + | - | applique
+F=/run/duo/appel-volume
+v=$(cat $F 2>/dev/null); v=${v:-4}
+case "$1" in
+	+) v=$((v + 1)) ;;
+	-) v=$((v - 1)) ;;
+esac
+[ $v -gt 5 ] && v=5; [ $v -lt 1 ] && v=1
+echo $v > $F
+amixer -q -c 0 cset name='Voice Rx Gain' "$v -1 20" 2>/dev/null
+[ "$1" = applique ] && exit 0
+# indicateur de volume de Phosh
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+	export $(tr '\0' '\n' < /proc/$(pidof phosh | cut -d' ' -f1)/environ | grep '^DBUS_SESSION_BUS_ADDRESS=')
+fi
+gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.ShowOSD \
+	"{'icon': <'call-start-symbolic'>, 'level': <$(awk -v v=$v 'BEGIN{printf "%.2f", v/5}')>, 'label': <'Volume d’appel'>}" > /dev/null 2>&1

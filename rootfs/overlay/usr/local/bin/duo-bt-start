@@ -1,0 +1,14 @@
+#!/bin/sh
+# Bluetooth (lancé HORS chroot) : attend que le DSP audio soit en ligne (sinon le noyau se bloque, cf. Droidian/Matrix),
+# puis démarre bluetoothd et duo-bt (puce WCN3998 sur ttyHS0 -> /dev/vhci). Rien n'est écrit sur le téléphone.
+R=/r
+for i in $(seq 120); do
+  for d in /sys/bus/msm_subsys/devices/*/; do [ "$(cat $d/name 2>/dev/null)" = adsp ] && [ "$(cat $d/state)" = ONLINE ] && break 2; done
+  sleep 1
+done
+chroot $R rfkill unblock bluetooth 2>/dev/null
+pidof bluetoothd >/dev/null || (setsid chroot $R /usr/lib/bluetooth/bluetoothd -n > /tmp/bluetoothd.log 2>&1 < /dev/null &)
+sleep 2
+pidof duo-bt >/dev/null || (setsid chroot $R /usr/local/sbin/duo-bt > /tmp/duo-bt.log 2>&1 < /dev/null &)
+# l'interrupteur « bt_power » du noyau reste bloqué : Phosh affichait alors le Bluetooth comme éteint
+sleep 5; chroot $R rfkill unblock all 2>/dev/null

@@ -1,0 +1,26 @@
+#!/bin/sh
+# gestes sur chaque écran tactile : 3 doigts vers la droite/gauche = fenêtre sur l autre écran ;
+# 1 doigt depuis un bord latéral de l'écran tel qu'on le voit = « Retour » (ferme le clavier, sinon page précédente),
+# comme Android ; en paysage ce sont le haut/bas de la dalle (duo-retour décide selon l'orientation).
+# Chaque détecteur se relance s'il s'arrête (ex. pilote tactile redémarré -> nouveaux /dev/input/eventN).
+export XDG_RUNTIME_DIR=/run/user/0
+for i in $(seq 30); do W=$(ls $XDG_RUNTIME_DIR 2>/dev/null | grep -m1 '^wayland-[0-9]*$'); [ -n "$W" ] && break; sleep 1; done
+export WAYLAND_DISPLAY=$W
+surveille() {
+  name="$1"; e="$2"   # e = A ou B, transmis à duo-retour (bord côté charnière ignoré en mode deux écrans)
+  while true; do
+    ev=$(awk -v n="$name" '/^N:/{f=index($0,n)>0} f&&/^H:/{match($0,/event[0-9]+/); print substr($0,RSTART,RLENGTH); exit}' /proc/bus/input/devices)
+    if [ -n "$ev" ] && [ -e /dev/input/$ev ]; then
+      # -w/-h : repère du tactile (pixels de la dalle en portrait) pour reconnaître les bords
+      lisgd -d /dev/input/$ev -t 150 -m 1500 -w 1350 -h 1800 \
+        -g "3,LR,*,*,R,/usr/local/bin/duo-move right" \
+        -g "3,RL,*,*,R,/usr/local/bin/duo-move left" \
+        -g "1,LR,L,*,R,/usr/local/bin/duo-retour $e gauche" \
+        -g "1,RL,R,*,R,/usr/local/bin/duo-retour $e droite"         -g "1,UD,T,*,R,/usr/local/bin/duo-retour $e haut"         -g "1,DU,B,*,R,/usr/local/bin/duo-retour $e bas"
+    fi
+    sleep 2
+  done
+}
+surveille "Surface Duo Touch A" A &
+surveille "Surface Duo Touch B" B &
+wait

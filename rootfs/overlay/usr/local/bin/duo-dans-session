@@ -1,0 +1,33 @@
+#!/bin/sh
+# Tout ce qui doit tourner DANS la session D-Bus de Phosh (lancé par duo-phosh via dbus-run-session)
+# réglages GNOME (enregistrés dans la session, sinon perdus) : pas de verrouillage automatique
+gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null
+gsettings set org.gnome.desktop.screensaver ubuntu-lock-on-suspend false 2>/dev/null
+# clavier visuel en AZERTY (français)
+gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'fr')]" 2>/dev/null
+# taille du clavier visuel : ~31 % de la hauteur en portrait, ~33 % en paysage (1.0 = presque la moitié de l'écran)
+gsettings set sm.puri.Squeekboard scale-in-vertical-screen-orientation 0.7 2>/dev/null
+gsettings set sm.puri.Squeekboard scale-in-horizontal-screen-orientation 1.2 2>/dev/null
+gsettings set org.gnome.settings-daemon.plugins.power ambient-enabled false 2>/dev/null   # luminosité auto : désactivée au démarrage (interrupteur dans Paramètres > Énergie)
+gsettings set sm.puri.phoc scale-to-fit false 2>/dev/null   # global : fausse la position des fenêtres (Firefox débordait et ne changeait plus d'écran)
+gsettings set sm.puri.phoc.application:/sm/puri/phoc/application/org-gnome-loupe/ scale-to-fit true 2>/dev/null   # seulement le Visionneur (fenêtre « Ouvrir l'image » trop large)
+(sleep 90; flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo > /dev/null 2>&1; flatpak update --user --appstream -y > /dev/null 2>&1) &   # logithèque : Flathub (installation utilisateur : celle que GNOME Logiciels peut utiliser ici)
+# favoris de l'accueil : téléphone, messages, contacts, navigateur
+gsettings set sm.puri.phosh favorites "['org.gnome.Calls.desktop', 'sm.puri.Chatty.desktop', 'org.gnome.Contacts.desktop', 'firefox.desktop', 'duo-camera.desktop']" 2>/dev/null
+# son : PipeWire (+ pulse) et WirePlumber
+(for i in $(seq 90); do [ -e /tmp/duo-son-pret ] && break; sleep 1; done   # attend la carte son + chemin micro (start.sh)
+ pipewire & sleep 1; wireplumber & pipewire-pulse &
+ # tant que la sortie n'a jamais joué, PipeWire ignore les réglages de volume (boutons, curseur de Phosh) :
+ # on joue 0,2 s de silence une fois pour la configurer (elle reste ensuite éveillée, cf. 53-duo-alsa-nodes.conf)
+ sleep 4; pw-play /usr/share/duo/silence.wav
+ wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.5) > /tmp/pipewire.log 2>&1 &   # volume de départ : 50 %
+# boutons : Power (rallumer les écrans, Phosh ne sait que les éteindre) et Volume +/-
+(sleep 3; /usr/local/bin/duo-power > /tmp/duo-power.log 2>&1) &
+# téléphonie (après Phosh) : audio d'appel, Appels et Chatty (SMS) en arrière-plan, gsd-wwan (code PIN de la SIM)
+(sleep 15; callaudiod > /tmp/callaudiod.log 2>&1 &
+ /usr/libexec/gsd-wwan > /tmp/gsd-wwan.log 2>&1 &
+ /usr/libexec/gsd-rfkill > /tmp/gsd-rfkill.log 2>&1 &     # état Bluetooth/mode avion pour les réglages rapides de Phosh
+ gnome-calls --daemon > /tmp/calls.log 2>&1 &
+ chatty --gapplication-service > /tmp/chatty.log 2>&1 &
+ gnome-clocks --gapplication-service > /tmp/clocks.log 2>&1 &) &   # alarmes même appli fermée
+exec phoc -C /etc/duo/phoc.ini -E "sh -c 'squeekboard & exec /usr/libexec/phosh -U'"

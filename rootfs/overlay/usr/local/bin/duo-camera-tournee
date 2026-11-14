@@ -1,0 +1,8 @@
+#!/bin/sh
+# Caméra en portrait : l'appli de Matrix dessine l'aperçu dans le sens du capteur (paysage). On la lance dans un
+# phoc imbriqué dont la sortie est tournée -> aperçu à l'endroit en plein écran (boutons sur le côté).
+# Sens : /etc/duo/camera-rotation (90 par défaut ; mettre 270 si l'image est à l'envers).
+R=$(cat /etc/duo/camera-rotation 2>/dev/null); R=${R:-90}
+C=/tmp/duo-camera-phoc.ini
+printf '[core]\nxwayland=false\n\n[output:WL-1]\nrotate=%s\nscale=1\n' "$R" > $C
+exec phoc -C $C -E /usr/local/bin/duo-camera

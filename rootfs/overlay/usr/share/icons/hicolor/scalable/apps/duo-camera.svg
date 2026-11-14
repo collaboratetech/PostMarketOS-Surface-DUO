@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="6 8 116 116">
+  <!-- Icône « Caméra » du Surface Duo, style des icônes d'applis GNOME (Adwaita) : volume simple, épaisseur en bas, palette GNOME -->
+  <defs>
+    <linearGradient id="corps" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5e5c64"/>
+      <stop offset="1" stop-color="#3d3846"/>
+    </linearGradient>
+    <radialGradient id="verre" cx="0.42" cy="0.38" r="0.7">
+      <stop offset="0" stop-color="#99c1f1"/>
+      <stop offset="0.45" stop-color="#3584e4"/>
+      <stop offset="1" stop-color="#1a5fb4"/>
+    </radialGradient>
+    <linearGradient id="bague" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#deddda"/>
+      <stop offset="1" stop-color="#9a9996"/>
+    </linearGradient>
+  </defs>
+  <!-- épaisseur (bas du boîtier) -->
+  <rect x="10" y="34" width="108" height="78" rx="18" fill="#241f31"/>
+  <!-- bosse du viseur -->
+  <path d="M40 30 l8 -12 h32 l8 12 z" fill="#3d3846"/>
+  <path d="M42 30 l7 -10 h30 l7 10 z" fill="#5e5c64"/>
+  <!-- boîtier -->
+  <rect x="10" y="28" width="108" height="78" rx="18" fill="url(#corps)"/>
+  <!-- bande de prise en main -->
+  <rect x="10" y="50" width="108" height="34" fill="#241f31" opacity="0.35"/>
+  <!-- flash et voyant -->
+  <rect x="88" y="37" width="18" height="9" rx="3" fill="#f6f5f4"/>
+  <circle cx="24" cy="41" r="4" fill="#e01b24"/>
+  <!-- objectif -->
+  <circle cx="64" cy="69" r="31" fill="#241f31"/>
+  <circle cx="64" cy="67" r="29" fill="url(#bague)"/>
+  <circle cx="64" cy="67" r="23" fill="#241f31"/>
+  <circle cx="64" cy="67" r="19" fill="url(#verre)"/>
+  <circle cx="64" cy="67" r="8" fill="#1c1c1c" opacity="0.55"/>
+  <!-- reflets -->
+  <ellipse cx="56" cy="58" rx="7" ry="4.5" fill="#ffffff" opacity="0.75" transform="rotate(-35 56 58)"/>
+  <circle cx="73" cy="76" r="2.5" fill="#ffffff" opacity="0.45"/>
+  <!-- liseré clair du haut du boîtier -->
+  <path d="M28 29 h72" stroke="#ffffff" stroke-opacity="0.18" stroke-width="2" stroke-linecap="round"/>
+</svg>

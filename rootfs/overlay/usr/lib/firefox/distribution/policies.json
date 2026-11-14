@@ -1,0 +1,13 @@
+{
+  "policies": {
+    "RequestedLocales": ["fr"],
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "OverrideFirstRunPage": "",
+    "UserMessaging": { "WhatsNew": false, "ExtensionRecommendations": false, "FeatureRecommendations": false, "SkipOnboarding": true },
+    "Preferences": {
+      "layout.css.devPixelsPerPx": { "Value": "0.85", "Status": "default" },
+      "browser.uidensity": { "Value": 1, "Status": "default" }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Après le démarrage de phoc, l'écran caméra (DSI-2) reste figé. Repasser en miroir puis en « join »
+# (comme Réglages > Écrans) le réveille. Lancé dans le chroot.
+export XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-0
+for i in $(seq 30); do wlr-randr >/dev/null 2>&1 && break; sleep 1; done
+sleep 3
+wlr-randr --output DSI-2 --pos 0,0 --scale 2
+sleep 2
+wlr-randr --output DSI-2 --pos 675,0 --scale 2

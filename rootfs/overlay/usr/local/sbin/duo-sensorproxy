@@ -1,0 +1,219 @@
+#!/usr/bin/python3 -I
+"""duo-sensorproxy : remplace iio-sensor-proxy (absent : les capteurs du Duo passent par le DSP SLPI, pas par IIO).
+Publie net.hadess.SensorProxy sur le bus système avec le capteur de lumière (ssccli --sensor light), ce qui donne
+à Phosh sa luminosité automatique (bouton « auto » du curseur). L'accéléromètre n'est PAS annoncé : la rotation
+des deux écrans est gérée par duo-posture."""
+import os, subprocess, threading, re, sys, time
+REPOS = "/run/duo/repos"
+from gi.repository import Gio, GLib
+
+NOM = "net.hadess.SensorProxy"
+XML = """
+<node>
+ <interface name="net.hadess.SensorProxy">
+  <method name="ClaimAccelerometer"/><method name="ReleaseAccelerometer"/>
+  <method name="ClaimLight"/><method name="ReleaseLight"/>
+  <method name="ClaimProximity"/><method name="ReleaseProximity"/>
+  <property name="HasAccelerometer" type="b" access="read"/>
+  <property name="AccelerometerOrientation" type="s" access="read"/>
+  <property name="AccelerometerTilt" type="s" access="read"/>
+  <property name="HasAmbientLight" type="b" access="read"/>
+  <property name="LightLevelUnit" type="s" access="read"/>
+  <property name="LightLevel" type="d" access="read"/>
+  <property name="HasProximity" type="b" access="read"/>
+  <property name="ProximityNear" type="b" access="read"/>
+ </interface>
+ <interface name="net.hadess.SensorProxy.Compass">
+  <method name="ClaimCompass"/><method name="ReleaseCompass"/>
+  <property name="HasCompass" type="b" access="read"/>
+  <property name="CompassHeading" type="d" access="read"/>
+ </interface>
+</node>"""
+
+etat = {"lux": 0.0, "lux_prec": 0.0}
+bus = None
+
+
+def log(m):
+    print("duo-sensorproxy: " + m, flush=True)
+
+
+def prop(conn, sender, path, iface, name):
+    v = {"HasAccelerometer": GLib.Variant("b", False), "AccelerometerOrientation": GLib.Variant("s", "undefined"),
+         "AccelerometerTilt": GLib.Variant("s", "undefined"), "HasAmbientLight": GLib.Variant("b", True),
+         "LightLevelUnit": GLib.Variant("s", "lux"), "LightLevel": GLib.Variant("d", etat["lux"]),
+         "HasProximity": GLib.Variant("b", False), "ProximityNear": GLib.Variant("b", False),
+         "HasCompass": GLib.Variant("b", False), "CompassHeading": GLib.Variant("d", -1.0)}
+    return v.get(name)
+
+
+def appel(conn, sender, path, iface, meth, params, inv):
+    log("%s par %s" % (meth, sender))
+    inv.return_value(None)        # Claim/Release : le flux tourne de toute façon
+
+
+def publier(lux):
+    etat["lux"] = lux
+    if bus:
+        bus.emit_signal(None, "/net/hadess/SensorProxy", "org.freedesktop.DBus.Properties", "PropertiesChanged",
+                        GLib.Variant("(sa{sv}as)", (NOM, {"LightLevel": GLib.Variant("d", lux)}, [])))
+    auto.lux(lux)
+    return False
+
+
+class AutoLum:
+    """Luminosité automatique (Phosh 0.47 la laisse à gsd-power, qu'on ne lance pas : il prendrait la touche Power).
+    Courbe en log(lux) comme Android/iOS (recette Matrix) ; si l'utilisateur bouge le curseur, on apprend son rapport
+    à la courbe et on s'y tient. Panneau 0 écrit, duo-posture recopie sur le panneau 1.
+    Interrupteur : Paramètres > Énergie > « Luminosité automatique » (désactivée par défaut, réglage du joueur)."""
+    BL = "/sys/class/backlight/panel0-backlight/"
+    COURBE = ((0.0, 0.03), (10.0, 0.12), (100.0, 0.30), (1000.0, 0.65), (5000.0, 1.0))
+    REGLAGE = "/root/.config/duo/luminosite-auto"
+
+    def __init__(self):
+        self.biais, self.ecrit, self.cible = 1.0, None, None
+        self.lu_a, self.etat_gnome = -10.0, False
+        try:
+            self.max = int(open(self.BL + "max_brightness").read())
+        except (OSError, ValueError):
+            self.max = 255
+        GLib.timeout_add(150, self.pas)
+
+    def actif(self):
+        """interrupteur GNOME « Luminosité automatique » (Paramètres > Énergie) = clé ambient-enabled,
+        lue toutes les 3 s sur le bus de la session Phosh ; « off » dans REGLAGE la force à l'arrêt."""
+        try:
+            if open(self.REGLAGE).read().strip() == "off":
+                return False
+        except OSError:
+            pass
+        now = time.monotonic()
+        if now - self.lu_a < 3.0:
+            return self.etat_gnome
+        self.lu_a = now
+        bus = None
+        for pid in os.listdir("/proc"):
+            try:
+                if pid.isdigit() and open("/proc/%s/comm" % pid).read().strip() == "phosh":
+                    for kv in open("/proc/%s/environ" % pid, "rb").read().split(b"\0"):
+                        if kv.startswith(b"DBUS_SESSION_BUS_ADDRESS="):
+                            bus = kv.split(b"=", 1)[1].decode()
+                    break
+            except OSError:
+                continue
+        if not bus:
+            return self.etat_gnome
+        try:
+            r = subprocess.run(["gsettings", "get", "org.gnome.settings-daemon.plugins.power", "ambient-enabled"],
+                               env=dict(os.environ, DBUS_SESSION_BUS_ADDRESS=bus, HOME="/root", XDG_RUNTIME_DIR="/run/user/0"), capture_output=True,
+                               text=True, timeout=3)
+            if r.returncode == 0:
+                avant, self.etat_gnome = self.etat_gnome, r.stdout.strip() == "true"
+                if avant != self.etat_gnome:
+                    log("luminosité automatique %s" % ("activée" if self.etat_gnome else "désactivée"))
+                    self.ecrit = None
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return self.etat_gnome
+
+    def courbe(self, lux):
+        import math
+        x = math.log10(1.0 + max(lux, 0.0))
+        pts = [(math.log10(1.0 + l), v) for l, v in self.COURBE]
+        if x <= pts[0][0]:
+            return pts[0][1]
+        for (x0, v0), (x1, v1) in zip(pts, pts[1:]):
+            if x <= x1:
+                return v0 + (v1 - v0) * (x - x0) / (x1 - x0)
+        return pts[-1][1]
+
+    def lire(self):
+        try:
+            return int(open(self.BL + "brightness").read())
+        except (OSError, ValueError):
+            return None
+
+    def lux(self, lux):
+        if not self.actif():
+            return
+        actuel = self.lire()
+        if actuel and self.ecrit is not None and abs(actuel - self.ecrit) > self.max * 0.04:
+            # l'utilisateur a bougé le curseur : on retient son goût par rapport à la courbe
+            self.biais = min(4.0, max(0.25, actuel / max(1.0, self.courbe(etat["lux_prec"]) * self.max)))
+            log("réglage manuel appris : biais %.2f" % self.biais)
+        etat["lux_prec"] = lux
+        self.cible = int(min(1.0, self.courbe(lux) * self.biais) * self.max)
+        self.cible = max(self.cible, int(self.max * 0.02))
+
+    def pas(self):
+        """transition douce vers la cible (pas d'à-coup), seulement écrans allumés (brightness 0 = éteints)"""
+        if self.cible is None or not self.actif():
+            return True
+        actuel = self.lire()
+        if not actuel:
+            return True
+        if self.ecrit is not None and abs(actuel - self.ecrit) > self.max * 0.04:
+            self.lux(etat["lux"])          # changement manuel entre deux mesures
+        if actuel != self.cible:
+            ecart = self.cible - actuel
+            nouveau = actuel + (ecart if abs(ecart) <= 3 else int(ecart * 0.25))
+            try:
+                open(self.BL + "brightness", "w").write(str(nouveau))
+                self.ecrit = nouveau
+            except OSError:
+                pass
+        return True
+
+
+
+
+def lie_au_parent():
+    """le flux ssccli meurt avec le service (sinon des flux orphelins gardent la puce éveillée)"""
+    import ctypes
+    ctypes.CDLL(None).prctl(1, 15)    # PR_SET_PDEATHSIG = SIGTERM
+
+
+def lecteur():
+    """flux ssccli (le capteur ne signale que les changements), relancé s'il s'arrête"""
+    import time
+    while True:
+        p = subprocess.Popen(["/usr/local/bin/ssccli", "--sensor", "light", "--timeout", "864000"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                            preexec_fn=lie_au_parent)
+        def surveiller(proc=p):          # veille (duo-veille) : le flux lumière est coupé pendant le repos
+            while proc.poll() is None:
+                if os.path.exists(REPOS):
+                    proc.kill()
+                    return
+                time.sleep(0.5)
+        threading.Thread(target=surveiller, daemon=True).start()
+        for ligne in p.stdout:
+            m = re.search(r"Light sensor measurement: ([\d.]+)", ligne)
+            if m:
+                GLib.idle_add(publier, float(m.group(1)))
+        p.wait()
+        if os.path.exists(REPOS):
+            log("repos : capteur de lumière coupé")
+            while os.path.exists(REPOS):
+                time.sleep(1)
+            log("fin du repos : capteur de lumière relancé")
+            continue
+        log("ssccli light arrêté, relance dans 3 s")
+        time.sleep(3)
+
+
+def acquis(conn, name):
+    global bus
+    bus = conn
+    info = Gio.DBusNodeInfo.new_for_xml(XML)
+    for i in info.interfaces:
+        conn.register_object("/net/hadess/SensorProxy" if i.name == NOM else "/net/hadess/SensorProxy/Compass",
+                             i, appel, prop, None)
+    log("service publié")
+    threading.Thread(target=lecteur, daemon=True).start()
+
+
+auto = AutoLum()
+Gio.bus_own_name(Gio.BusType.SYSTEM, NOM, Gio.BusNameOwnerFlags.NONE, acquis, None,
+                 lambda c, n: (log("nom refusé sur le bus système"), sys.exit(1)))
+GLib.MainLoop().run()
