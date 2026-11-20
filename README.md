@@ -78,8 +78,22 @@ Android then starts from a fresh setup screen.
   (controls end up on the side); direction set in `/etc/duo/camera-rotation`.
 - The USB network link to the PC can drop during big transfers (the installer sends data in verified chunks).
 - Touch: the outer columns of the left panel pull touches inwards; an edge stretch compensates (`DUO_X_STRETCH_*`).
+  Panels differ: measure yours with `duo-touch-test A` / `duo-touch-test B` and set stretches/offsets in
+  `/etc/duo/touch.conf`.
 - Firefox shows a sandbox warning (old 4.14 kernel); Chromium runs with `--no-sandbox`.
 - Untested on real hardware yet: USB accessories, GPS outdoor fix, hotspot with a connected client.
+
+## Recent fixes
+
+- **Brightness slider** in Phosh's top-bar menu works (`duo-brightness`: Phosh 0.47 only talks to gsd-power,
+  which this port doesn't run); Settings → Power now also shows *Automatic Screen Brightness*.
+- **Power off / Restart / Log out** from Phosh's menu or a long press on Power work (`duo-session-manager`,
+  a minimal `org.gnome.SessionManager`; there is no gnome-session).
+- **Flatpak apps** installed from GNOME Software / Flathub show up in the app grid (`XDG_DATA_DIRS`), and
+  Electron apps run on Wayland (`ELECTRON_OZONE_PLATFORM_HINT=auto`, no Xwayland here).
+- **Rotation** reacts faster: 0.35 s hold instead of 0.8 s, at a slightly smaller tilt (`/etc/duo/rotation.conf`).
+- **Touch**: per-panel calibration file and test tool (above); taps register ~20 ms sooner (`DUO_QUIET_MS`).
+- **GPU** minimum clock 345 MHz instead of 257 MHz, so animations and scrolling start faster.
 
 ## Contributing
 

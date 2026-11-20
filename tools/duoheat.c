@@ -35,7 +35,8 @@
 #define MERGE_CELLS 1.6       /* two maxima closer than this = the same finger */
 #define TRACK_PX 260.0        /* frame-to-frame matching: max. jump in device pixels (~100 Hz) */
 #define SLOP_PX 24.0          /* dead zone like duotouch/Android «touch slop»: GTK treats ~7 logical px of wobble as a drag */
-#define QUIET_MS 60           /* no frame for this long = everything lifted (the controller is silent without touch) */
+static int QUIET_MS = 60;    /* no frame for this long = everything lifted (the controller is silent without touch);
+                                 DUO_QUIET_MS in /etc/duo/touch.conf (lower = taps register sooner, keep >= ~35 at 100 Hz) */
 #define SLOTS 10
 /* Ghosts (01.11. 13:34: a 9 ms touch on the terminal's close button while typing closed the window): a new
  * blob is only reported once it is there again in the next frame (~10 ms). Real taps last > 30 ms. */
@@ -90,6 +91,29 @@ static double etirement_x(const struct panel *p, int droite){
   static const double defaut[4]={1.25,1.25,1.0,1.25};
   if(!k[i]){ const char *e=getenv(noms[i]); k[i]=e?atof(e):defaut[i]; if(k[i]<1) k[i]=1; }
   return k[i];
+}
+/* calibration offsets per panel (physical px), from /etc/duo/touch.conf or the environment:
+ * DUO_X_OFFSET_A, DUO_Y_OFFSET_A, DUO_X_OFFSET_B, DUO_Y_OFFSET_B (default 0). Measure with duo-touch-test. */
+static double decalage(const struct panel *p, int axe_y){
+  static double v[4]; static int lu[4]; int i=(p->name[18]=='B')*2+axe_y;
+  static const char *noms[4]={"DUO_X_OFFSET_A","DUO_Y_OFFSET_A","DUO_X_OFFSET_B","DUO_Y_OFFSET_B"};
+  if(!lu[i]){ const char *e=getenv(noms[i]); v[i]=e?atof(e):0; lu[i]=1; }
+  return v[i];
+}
+/* /etc/duo/touch.conf (lignes NOM=valeur, # commentaires) : réglages DUO_* lus au démarrage, prioritaires sur
+ * l'environnement. duoheat tourne hors du chroot : on cherche d'abord /r/etc/duo/touch.conf. */
+static void charge_reglages(void){
+  const char *chemins[]={"/r/etc/duo/touch.conf","/etc/duo/touch.conf"};
+  for(int k=0;k<2;k++){
+    FILE *f=fopen(chemins[k],"r"); if(!f) continue;
+    char l[256];
+    while(fgets(l,sizeof l,f)){
+      char *e=strchr(l,'='); if(l[0]=='#'||!e||strncmp(l,"DUO_",4)) continue;
+      *e=0; char *v=e+1; v[strcspn(v," \t\r\n#")]=0; setenv(l,v,1);
+      fprintf(stderr,"duoheat: %s=%s (%s)\n",l,v,chemins[k]);
+    }
+    fclose(f); return;
+  }
 }
 static int barre_sur(const struct panel *p){
   static long long lu=0; static char b='A';
@@ -246,6 +270,7 @@ static void frame(struct panel *p,const unsigned char *h){
      * le « + » en haut à gauche de Messages était inatteignable) -> étirer les 300 px de chaque côté.
      * Réglable : DUO_X_STRETCH (défaut 1.25). */
     { if(ox<300) ox=300-(300-ox)*etirement_x(p,0); else if(ox>PW-300) ox=(PW-300)+(ox-(PW-300))*etirement_x(p,1); }
+    ox+=decalage(p,0); oy+=decalage(p,1);   /* calibration (duo-touch-test) */
     int x=(int)lround(ox), y=(int)lround(oy);
     if(x<0)x=0; if(x>PW-1)x=PW-1; if(y<0)y=0; if(y>PH-1)y=PH-1;
     emit(p->fd,EV_ABS,ABS_MT_SLOT,i); emit(p->fd,EV_ABS,ABS_MT_POSITION_X,x); emit(p->fd,EV_ABS,ABS_MT_POSITION_Y,y);
@@ -259,6 +284,8 @@ static void frame(struct panel *p,const unsigned char *h){
 }
 
 int main(int argc,char**argv){
+  charge_reglages();
+  { const char *e=getenv("DUO_QUIET_MS"); if(e&&atoi(e)>=20) QUIET_MS=atoi(e); }
   const char *dev=argc>1?argv[1]:"/dev/hidraw0";
   struct panel L={.rid=0x3F,.pid=0x0c01,.name="Surface Duo Touch A",.mute="/run/duo/mute-A",.cal=CAL_L},
                R={.rid=0x0D,.pid=0x0c02,.name="Surface Duo Touch B",.mute="/run/duo/mute-B",.cal=CAL_R};

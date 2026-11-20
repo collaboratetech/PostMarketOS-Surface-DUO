@@ -22,7 +22,8 @@ TOUCHE = {"DSI-1": "A", "DSI-2": "B"}
 
 
 def log(m):
-    print("duo-posture: " + m, flush=True)
+    t = time.time()
+    print("%s.%03d duo-posture: %s" % (time.strftime("%H:%M:%S", time.localtime(t)), int(t * 1000) % 1000, m), flush=True)
 
 
 def lire(p, d=None):
@@ -275,7 +276,7 @@ class Rotation:
     aux écrans doit d'abord être mesuré. Format (JSON) :
       {"axes": {"+y": "normal", "-y": "180", "+x": "gauche", "-x": "droite"},
        "transform": {"normal": "normal", "180": "180", "droite": "90", "gauche": "270"},
-       "seuil": 6.0}
+       "seuil": 6.0, "delai": 0.8}      (seuil : m/s² sur l'axe latéral ; delai : tenue avant de tourner, s)
     Orientation = sens dans lequel l'appareil est tourné ; disposition : normal = A|B côte à côte, 180 = B|A,
     droite (tourné horaire) = A au-dessus de B, gauche = B au-dessus de A. Verrou : fichier /run/duo/rotation-verrou."""
     CONF = "/etc/duo/rotation.conf"
@@ -305,7 +306,9 @@ class Rotation:
             return                       # à plat ou entre deux : on garde l'orientation actuelle
         if o != self.cand:
             self.cand, self.cand_depuis = o, time.monotonic()
-        elif time.monotonic() - self.cand_depuis > 0.8:
+            if o != self.ori:
+                log("rotation : nouvelle orientation vue %s (x=%.1f y=%.1f)" % (o, ax, ay))
+        elif time.monotonic() - self.cand_depuis > self.conf.get("delai", 0.8):   # rotation.conf "delai" (s)
             self.ori = o
 
     def appliquer(self, mode):
@@ -355,8 +358,10 @@ class Rotation:
         self.cle = cle
         if len(args) == 1:
             return
+        t0 = time.monotonic()
         r = subprocess.run(args, env=env, capture_output=True, text=True, timeout=8)
-        log("rotation %s (%s) : %s" % (ori, mode, "ok" if r.returncode == 0 else r.stderr.strip()[:120]))
+        log("rotation %s (%s) : %s en %.0f ms" % (ori, mode, "ok" if r.returncode == 0 else r.stderr.strip()[:120],
+                                                  (time.monotonic() - t0) * 1000))
         self.cle = cle
 
 
