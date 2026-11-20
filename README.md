@@ -114,7 +114,7 @@ caméra, capteurs (postures de la charnière, rotation auto, mode PC portable) e
 - **Revenir à Android :** `./installer/duo.sh restore-android <sauvegarde boot_b.img>`.
 
 - **Écran de verrouillage :** il faisait planter le pilote des écrans, le verrouillage automatique est donc désactivé
-  par défaut. Il a fonctionné lors des derniers essais : à activer dans Réglages mobiles → Fingerprint & Lock.
+  par défaut. Il a fonctionné lors des derniers essais : à activer dans Réglages mobiles → Surface Duo.
 - **Lecteur d'empreintes :** fonctionne (enregistrement, déverrouillage), voir [`docs/FINGERPRINT.md`](docs/FINGERPRINT.md).
 - **Projet open source (GPL-3.0)** : issues, pull requests et tests bienvenus, voir [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
