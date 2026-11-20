@@ -1,11 +1,11 @@
 # Fingerprint reader
 
 The Duo's FPC fingerprint sensor works from Linux: enrolling, matching, saving fingerprints across reboots, and
-unlocking Phosh's lock screen. Managed from **Mobile Settings → Fingerprint & Lock** or the `duo-fingerprint` command.
+unlocking Phosh's lock screen. Managed from **Mobile Settings → Surface Duo** or the `duo-fingerprint` command.
 
 ## Using it
 
-- **Mobile Settings → Fingerprint & Lock**: unlock with fingerprint on/off, lock when the screen turns off on/off,
+- **Mobile Settings → Surface Duo**: automatic brightness on/off, unlock with fingerprint on/off, lock when the screen turns off on/off,
   the list of enrolled fingers (remove with the bin icon), **Add fingerprint** (progress shown on the page and as a
   notification; touch, lift and repeat about 15–20 times).
 - The lock screen PIN is the user's Unix password (`passwd`). It always works, fingerprint or not.

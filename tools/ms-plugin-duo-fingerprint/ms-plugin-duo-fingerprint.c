@@ -324,7 +324,7 @@ ms_duo_fp_panel_init (MsDuoFpPanel *self)
   GtkWidget *lock_group = adw_preferences_group_new ();
   GtkWidget *status_group = adw_preferences_group_new ();
 
-  g_object_set (self, "title", "Fingerprint & Lock", NULL);
+  g_object_set (self, "title", "Surface Duo", NULL);
   self->finger_rows = g_ptr_array_new ();
 
   adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (lock_group), "Unlocking");
@@ -343,6 +343,20 @@ ms_duo_fp_panel_init (MsDuoFpPanel *self)
   adw_switch_row_set_active (self->autolock_row, g_file_test (AUTOLOCK, G_FILE_TEST_EXISTS));
   g_signal_connect_swapped (self->autolock_row, "notify::active", G_CALLBACK (on_autolock_toggled), self);
   adw_preferences_group_add (ADW_PREFERENCES_GROUP (lock_group), GTK_WIDGET (self->autolock_row));
+
+  /* Display: automatic brightness (duo-sensorproxy follows this GNOME key with the light sensor) */
+  {
+    GtkWidget *display_group = adw_preferences_group_new ();
+    GtkWidget *auto_row = adw_switch_row_new ();
+    g_autoptr (GSettings) power = g_settings_new ("org.gnome.settings-daemon.plugins.power");
+
+    adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (display_group), "Display");
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (auto_row), "Automatic brightness");
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (auto_row), "Adjust to the light sensor; the slider sets your preference");
+    g_settings_bind (power, "ambient-enabled", auto_row, "active", G_SETTINGS_BIND_DEFAULT);
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (display_group), auto_row);
+    adw_preferences_page_add (ADW_PREFERENCES_PAGE (page), ADW_PREFERENCES_GROUP (display_group));
+  }
 
   self->fingers_group = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
   adw_preferences_group_set_title (self->fingers_group, "Fingerprints");

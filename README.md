@@ -74,7 +74,7 @@ Android then starts from a fresh setup screen.
 
 - **Lock screen:** enabling Phosh's lock screen used to make the display driver crash (screens freeze or go black),
   so automatic locking is **off** by default. Locking/waking worked in recent testing; turn it on in
-  Mobile Settings → Fingerprint & Lock and report any freeze.
+  Mobile Settings → Surface Duo and report any freeze.
 - Camera preview in portrait is obtained by running the camera inside a rotated nested compositor
   (controls end up on the side); direction set in `/etc/duo/camera-rotation`.
 - The USB network link to the PC can drop during big transfers (the installer sends data in verified chunks).
