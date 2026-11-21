@@ -89,8 +89,11 @@ Android then starts from a fresh setup screen.
   which this port doesn't run); Settings → Power now also shows *Automatic Screen Brightness*.
 - **Power off / Restart / Log out** from Phosh's menu or a long press on Power work (`duo-session-manager`,
   a minimal `org.gnome.SessionManager`; there is no gnome-session).
-- **Flatpak apps** installed from GNOME Software / Flathub show up in the app grid (`XDG_DATA_DIRS`), and
-  Electron apps run on Wayland (`ELECTRON_OZONE_PLATFORM_HINT=auto`, no Xwayland here).
+- **Flatpak apps** installed from GNOME Software / Flathub show up in the app grid (`XDG_DATA_DIRS`) and start:
+  the session is chrooted and Linux refuses user namespaces inside a chroot, so `duo-bwrap` (`FLATPAK_BWRAP`) runs
+  bubblewrap without `--unshare-user` (root needs none for the rest of the sandbox). Electron apps also get
+  `ELECTRON_DISABLE_SANDBOX=1` and Wayland (`/var/lib/flatpak/overrides/global`); older Electron builds may still
+  need `--ozone-platform=wayland` on their launcher line. Tested with FreeTube.
 - **Rotation** reacts faster: 0.35 s hold instead of 0.8 s, at a slightly smaller tilt (`/etc/duo/rotation.conf`).
 - **Touch**: per-panel calibration file and test tool (above); taps register ~20 ms sooner (`DUO_QUIET_MS`).
 - **GPU** minimum clock 345 MHz instead of 257 MHz, so animations and scrolling start faster.

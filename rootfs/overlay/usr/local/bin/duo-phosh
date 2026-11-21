@@ -36,6 +36,8 @@ export XDG_CURRENT_DESKTOP=Phosh:GNOME XDG_SESSION_DESKTOP=phosh XDG_SESSION_TYP
 # applis Flatpak (Logiciels / Flathub) visibles dans la grille de Phosh ; Electron en Wayland natif (pas de Xwayland)
 export XDG_DATA_DIRS=/root/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share
 export ELECTRON_OZONE_PLATFORM_HINT=auto
+# Flatpak : la session est chrootée, Linux y refuse les espaces de noms utilisateur -> bwrap sans --unshare-user
+export FLATPAK_BWRAP=/usr/local/bin/duo-bwrap
 # session D-Bus : réglages GNOME, son (PipeWire), touche Power, puis phoc + phosh + clavier
 # relancée automatiquement si elle s'arrête (plantage de phoc/phosh) : sinon écran noir définitif.
 # Le journal de la session plantée est gardé dans /tmp/phosh-plantage-HHMMSS.log
