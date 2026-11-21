@@ -80,7 +80,9 @@ Android then starts from a fresh setup screen.
 - Touch: the outer columns of the left panel pull touches inwards; an edge stretch compensates (`DUO_X_STRETCH_*`).
   Panels differ: measure yours with `duo-touch-test A` / `duo-touch-test B` and set stretches/offsets in
   `/etc/duo/touch.conf`.
-- Firefox shows a sandbox warning (old 4.14 kernel); Chromium runs with `--no-sandbox`.
+- Browsers can't use their user-namespace sandbox: the session runs in a chroot, where Linux refuses user namespaces.
+  Firefox keeps its seccomp sandbox and no longer shows a warning bar about it (`defaults/pref/duo-sandbox.js`);
+  Chromium runs with `--no-sandbox` (everything runs as root) without the warning bar (managed policy).
 - Untested on real hardware yet: USB accessories, GPS outdoor fix, hotspot with a connected client.
 
 ## Recent fixes
