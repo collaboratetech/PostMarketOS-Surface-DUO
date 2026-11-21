@@ -48,12 +48,14 @@ static int QUIET_MS = 60;    /* no frame for this long = everything lifted (the 
 #define CAL_L { -0.7828, -64.5060, 1339.6392, 67.6757, -0.3957, 22.8883 }   /* 0x3F, DSI-1, 6 points, residual 7.6 px */
 #define CAL_R { -1.0110, -66.4916, 1344.9532, 68.5255,  0.8634, -13.7480 }  /* 0x0D, DSI-2, 11 points, residual 8.6 px */
 
-struct contact { int active, id; double x, y, sx, sy, dx, dy; int slopped, seen, frames, peak, area; double gx, gy; long long t0; int top; double yoff; int snap; double fx, fy; };
+struct contact { int active, id; double x, y, sx, sy, dx, dy; int slopped, seen, frames, peak, area; double gx, gy; long long t0; int top; double yoff; int snap; double fx, fy; int homechk, homeblock; };
 /* DuoPort : le capteur n'a qu'une rangée tout en haut : la barre de Phosh (0-64 px) et l'en-tête des applis juste
  * dessous donnent la même mesure (≈51 px). Un doigt posé en haut qui GLISSE vers le bas va à la barre (notifications) ;
  * un doigt posé en haut qui reste IMMOBILE (appui, appui long) va à l'appli, juste sous la barre (TOP_APP_Y). */
 #define TOP_BAND 90
-#define TOP_APP_Y 105.0
+/* UI scale of the outputs (/etc/duo/scale, default 2): Phosh's bars are 32 (top) and 15 (home) logical px high */
+static double ui_scale = 2.0;
+#define TOP_APP_Y (52.5*ui_scale)   /* just under Phosh's top bar (105 px at scale 2) */
 #define TOP_DRAG_PX 50.0   /* DuoPort 12/11 : 30 -> 50, un appui qui tremble ne déroule plus la barre */
 #define TOP_HOLD_FRAMES 12   /* active: 0 free, 1 candidate, 2 reported */
 struct panel { int rid, fd, pid; const char *name, *mute; double cal[6]; struct contact c[SLOTS]; long long last_frame; int any; };
@@ -271,6 +273,15 @@ static void frame(struct panel *p,const unsigned char *h){
      * Réglable : DUO_X_STRETCH (défaut 1.25). */
     { if(ox<300) ox=300-(300-ox)*etirement_x(p,0); else if(ox>PW-300) ox=(PW-300)+(ox-(PW-300))*etirement_x(p,1); }
     ox+=decalage(p,0); oy+=decalage(p,1);   /* calibration (duo-touch-test) */
+    /* Phosh's home bar: full width, 15 logical px high, but only around the white handle (centred) should react.
+     * A touch that starts in the bar outside the handle stays just above the bar for its whole life (goes to the
+     * app). Only on the panel carrying Phosh's bars in normal orientation (/run/duo/barre). DUO_HOME_HALF_WIDTH
+     * (logical px each side of the centre, default 100; 0 = whole bar as before) in /etc/duo/touch.conf. */
+    { static double half=-1; if(half<0){ const char *e=getenv("DUO_HOME_HALF_WIDTH"); half=e?atof(e):100; }
+      double band=15*ui_scale;
+      if(!c->homechk){ c->homechk=1;
+        if(half>0 && barre_sur(p) && oy>=PH-band && fabs(ox-PW/2.0)>half*ui_scale) c->homeblock=1; }
+      if(c->homeblock && oy>PH-band-1) oy=PH-band-1; }
     int x=(int)lround(ox), y=(int)lround(oy);
     if(x<0)x=0; if(x>PW-1)x=PW-1; if(y<0)y=0; if(y>PH-1)y=PH-1;
     emit(p->fd,EV_ABS,ABS_MT_SLOT,i); emit(p->fd,EV_ABS,ABS_MT_POSITION_X,x); emit(p->fd,EV_ABS,ABS_MT_POSITION_Y,y);
@@ -285,6 +296,9 @@ static void frame(struct panel *p,const unsigned char *h){
 
 int main(int argc,char**argv){
   charge_reglages();
+  { const char *ch[]={"/r/etc/duo/scale","/etc/duo/scale"}; for(int k=0;k<2;k++){ FILE *f=fopen(ch[k],"r");
+      if(f){ double v; if(fscanf(f,"%lf",&v)==1&&v>=1&&v<=4) ui_scale=v; fclose(f); break; } }
+    fprintf(stderr,"duoheat: UI scale %.2f\n",ui_scale); }
   { const char *e=getenv("DUO_QUIET_MS"); if(e&&atoi(e)>=20) QUIET_MS=atoi(e); }
   const char *dev=argc>1?argv[1]:"/dev/hidraw0";
   struct panel L={.rid=0x3F,.pid=0x0c01,.name="Surface Duo Touch A",.mute="/run/duo/mute-A",.cal=CAL_L},
