@@ -320,6 +320,7 @@ class Rotation:
             return                       # à plat ou entre deux : on garde l'orientation actuelle
         if o != self.cand:
             self.cand, self.cand_depuis = o, time.monotonic()
+            ecrire("/run/duo/orientation", o)   # tenue réelle, sans attendre la rotation (lu par duo-camera-declencheur)
             if o != self.ori:
                 log("rotation : nouvelle orientation vue %s (x=%.1f y=%.1f)" % (o, ax, ay))
         elif time.monotonic() - self.cand_depuis > self.conf.get("delai", 0.8):   # rotation.conf "delai" (s)
