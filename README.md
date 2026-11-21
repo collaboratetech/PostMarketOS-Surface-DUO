@@ -76,6 +76,8 @@ Android then starts from a fresh setup screen.
   The lock screen is therefore **disabled** for now. Help welcome!
 - The camera runs inside a nested compositor whose rotation follows the screen's (portrait, landscape, upside down),
   so the preview stays upright; base direction in `/etc/duo/camera-rotation` (90, or 270 if upside down).
+  In that layout the app draws no shutter: tap anywhere on the picture, or press a volume button
+  (`duo-camera-declencheur`, an overlay that sends the app's Space key).
 - The USB network link to the PC can drop during big transfers (the installer sends data in verified chunks).
 - Touch: the outer columns of the left panel pull touches inwards; an edge stretch compensates (`DUO_X_STRETCH_*`).
   Panels differ: measure yours with `duo-touch-test A` / `duo-touch-test B` and set stretches/offsets in
